@@ -1,6 +1,5 @@
 flet
 pandas
-io
 asyncio
 uuid
 datetime
