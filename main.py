@@ -1,7 +1,6 @@
 from flet import *
 import sqlite3
-import pandas as pd
-from io import BytesIO
+import openpyxl
 import asyncio
 import uuid
 import os
@@ -17,7 +16,6 @@ TEXT_COLOR = Colors.BLACK87
 def init_db():
     conn = sqlite3.connect("alson_education.db")
     c = conn.cursor()
-    # جدول المستخدمين
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         code TEXT PRIMARY KEY,
         username TEXT NOT NULL,
@@ -25,7 +23,6 @@ def init_db():
         role TEXT DEFAULT 'user',
         password TEXT NOT NULL
     )''')
-    # جدول المحتوى
     c.execute('''CREATE TABLE IF NOT EXISTS content (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
@@ -34,7 +31,6 @@ def init_db():
         uploaded_by TEXT NOT NULL,
         upload_date TEXT NOT NULL
     )''')
-    # جدول الشات
     c.execute('''CREATE TABLE IF NOT EXISTS chat (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sender_code TEXT NOT NULL,
@@ -42,7 +38,6 @@ def init_db():
         message TEXT NOT NULL,
         timestamp TEXT NOT NULL
     )''')
-    # إضافة أدمن افتراضي
     c.execute("SELECT * FROM users WHERE code='admin123'")
     if not c.fetchone():
         c.execute("INSERT INTO users (code, username, department, role, password) VALUES (?, ?, ?, ?, ?)",
@@ -147,7 +142,6 @@ def main(page: Page):
         page.views.clear()
         is_admin = app_state.current_user["role"] == "admin"
 
-        # صفحة تسجيل الدخول
         if page.route == "/":
             page.views.append(
                 create_view(
@@ -169,7 +163,6 @@ def main(page: Page):
                 )
             )
 
-        # الصفحة الرئيسية
         elif page.route == "/الصفحه الراسية":
             page.views.append(
                 create_view(
@@ -182,7 +175,6 @@ def main(page: Page):
                                 Column([
                                     Text(f"جدول قسم {app_state.current_user['department']}", size=18, weight=FontWeight.BOLD),
                                     Image(src="assets/img/po.jpg", width=340, fit=ImageFit.COVER, border_radius=10),
-                                   
                                 ]),
                                 padding=10
                             ),
@@ -198,7 +190,6 @@ def main(page: Page):
                 )
             )
 
-        # صفحة الملف الشخصي
         elif page.route == "/الملف_الشخصي":
             if not app_state.current_user["code"]:
                 page.go("/")
@@ -241,7 +232,6 @@ def main(page: Page):
                 )
             )
 
-        # صفحة إدارة المستخدمين
         elif page.route == "/ادارة_المستخدمين" and is_admin:
             file_picker = FilePicker(on_result=lambda e: asyncio.run(upload_users_async(e, page)))
 
@@ -251,23 +241,21 @@ def main(page: Page):
                 if e.files:
                     file_path = e.files[0].path
                     try:
-                        xl = pd.ExcelFile(file_path)
+                        workbook = openpyxl.load_workbook(file_path)
                         conn = sqlite3.connect("alson_education.db")
                         c = conn.cursor()
-                        for sheet_name in xl.sheet_names:
-                            df = pd.read_excel(file_path, sheet_name=sheet_name)
+                        for sheet_name in workbook.sheetnames:
+                            sheet = workbook[sheet_name]
                             department = sheet_name
-                            for index, row in df.iterrows():
-                                username = str(row.iloc[0])
-                                password = str(row.iloc[1])
+                            for row in sheet.iter_rows(min_row=2, values_only=True):
+                                username = str(row[0])
+                                password = str(row[1])
                                 code = str(uuid.uuid4())[:8]
                                 c.execute("INSERT OR REPLACE INTO users (code, username, department, role, password) VALUES (?, ?, ?, ?, ?)",
-                                          (code, username, department, "user", password))
+                                        (code, username, department, "user", password))
                         conn.commit()
                         conn.close()
                         page.snack_bar = SnackBar(content=Text("تم رفع المستخدمين بنجاح", color=Colors.GREEN), open=True)
-                    except ImportError:
-                        page.snack_bar = SnackBar(content=Text("يرجى تثبيت مكتبة openpyxl لرفع ملفات Excel", color=Colors.RED), open=True)
                     except Exception as ex:
                         page.snack_bar = SnackBar(content=Text(f"حدث خطأ أثناء رفع الملف: {str(ex)}", color=Colors.RED), open=True)
                 else:
@@ -388,7 +376,6 @@ def main(page: Page):
                 )
             )
 
-        # صفحة رفع المحتوى (للأدمن فقط)
         elif page.route == "/رفع_المحتوى" and is_admin:
             content_title = TextField(label="عنوان المحتوى", border_radius=15, bgcolor=Colors.WHITE, border_color=PRIMARY_COLOR)
             content_picker = FilePicker(on_result=lambda e: asyncio.run(upload_content_async(e, page, content_title.value)))
@@ -436,7 +423,6 @@ def main(page: Page):
                 )
             )
 
-        # صفحة عرض المحتوى (للمستخدمين العاديين)
         elif page.route == "/المحتوى":
             conn = sqlite3.connect("alson_education.db")
             c = conn.cursor()
@@ -472,7 +458,6 @@ def main(page: Page):
                 )
             )
 
-        # صفحة الشات
         elif page.route == "/الشات":
             conn = sqlite3.connect("alson_education.db")
             c = conn.cursor()
@@ -538,7 +523,6 @@ def main(page: Page):
                 )
             )
 
-        # صفحة استعلام النتائج
         elif page.route == "/النتيجه":
             student_id = TextField(label="رقم الجلوس", prefix_icon=icons.NUMBERS, border_radius=15, bgcolor=Colors.WHITE, width=320, keyboard_type=KeyboardType.NUMBER, border_color=PRIMARY_COLOR)
             def show_results(e):
@@ -561,7 +545,6 @@ def main(page: Page):
                 )
             )
 
-        # صفحة عرض النتيجة
         elif page.route == "/عرض النتيجة":
             results = {"math": "85/100", "science": "92/100", "arabic": "88/100"}
             page.views.append(
@@ -589,7 +572,6 @@ def main(page: Page):
                 )
             )
 
-        # صفحة المساعدة
         elif page.route == "/المساعدة":
             page.views.append(
                 create_view(
@@ -610,13 +592,11 @@ def main(page: Page):
                             ),
                             elevation=5, shape=RoundedRectangleBorder(radius=15), width=340
                         ),
-                      
                     ], spacing=20, horizontal_alignment=CrossAxisAlignment.CENTER),
                     is_admin=is_admin
                 )
             )
 
-        # صفحة الخطأ
         else:
             page.views.append(
                 create_view(
