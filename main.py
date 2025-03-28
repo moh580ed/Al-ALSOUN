@@ -1,51 +1,10 @@
 from flet import *
-import sqlite3
-import openpyxl
-import asyncio
-import uuid
-import os
-from datetime import datetime
 
 # ألوان مخصصة
 PRIMARY_COLOR = Colors.BLUE_800
 SECONDARY_COLOR = Colors.GREY_200
 ACCENT_COLOR = Colors.AMBER_600
 TEXT_COLOR = Colors.BLACK87
-
-# إعداد قاعدة البيانات
-def init_db():
-    conn = sqlite3.connect("alson_education.db")
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        code TEXT PRIMARY KEY,
-        username TEXT NOT NULL,
-        department TEXT NOT NULL,
-        role TEXT DEFAULT 'user',
-        password TEXT NOT NULL
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS content (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        file_path TEXT NOT NULL,
-        file_type TEXT NOT NULL,
-        uploaded_by TEXT NOT NULL,
-        upload_date TEXT NOT NULL
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS chat (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sender_code TEXT NOT NULL,
-        receiver_code TEXT NOT NULL,
-        message TEXT NOT NULL,
-        timestamp TEXT NOT NULL
-    )''')
-    c.execute("SELECT * FROM users WHERE code='admin123'")
-    if not c.fetchone():
-        c.execute("INSERT INTO users (code, username, department, role, password) VALUES (?, ?, ?, ?, ?)",
-                  ("admin123", "Admin", "إدارة", "admin", "adminpass"))
-    conn.commit()
-    conn.close()
-
-init_db()
 
 # متغيرات الحالة
 class AppState:
@@ -121,17 +80,13 @@ def main(page: Page):
         text_style=TextStyle(color=TEXT_COLOR, size=16)
     )
 
-    async def validate_login_async(e):
+    def validate_login(e):
         app_state.is_loading = True
         page.update()
         username, password = username_field.value.strip(), password_field.value.strip()
-        conn = sqlite3.connect("alson_education.db")
-        c = conn.cursor()
-        c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
-        user = c.fetchone()
-        conn.close()
-        if user:
-            app_state.current_user.update({"email": user[1], "code": user[0], "role": user[3], "department": user[2]})
+        # محاكاة تسجيل الدخول بدون قاعدة بيانات
+        if username == "admin" and password == "adminpass":
+            app_state.current_user.update({"email": "Admin", "code": "admin123", "role": "admin", "department": "إدارة"})
             page.go("/الصفحه الراسية")
         else:
             page.snack_bar = SnackBar(content=Text("بيانات غير صحيحة", color=Colors.RED), open=True)
@@ -154,7 +109,7 @@ def main(page: Page):
                         password_field,
                         ElevatedButton(
                             "تسجيل الدخول",
-                            on_click=validate_login_async,  # استدعاء مباشر للدالة المتزامنة
+                            on_click=validate_login,
                             width=200, height=50, elevation=5,
                             style=ButtonStyle(bgcolor=PRIMARY_COLOR, color=Colors.WHITE, shape=RoundedRectangleBorder(radius=12)),
                         ),
@@ -197,18 +152,6 @@ def main(page: Page):
                 page.update()
                 return
 
-            conn = sqlite3.connect("alson_education.db")
-            c = conn.cursor()
-            c.execute("SELECT * FROM users WHERE code=?", (app_state.current_user["code"],))
-            user = c.fetchone()
-            conn.close()
-
-            if user is None:
-                page.go("/")
-                page.snack_bar = SnackBar(content=Text("المستخدم غير موجود", color=Colors.RED), open=True)
-                page.update()
-                return
-
             page.views.append(
                 create_view(
                     page,
@@ -218,9 +161,9 @@ def main(page: Page):
                         Card(
                             content=Container(
                                 Column([
-                                    Row([Icon(icons.PERSON, color=PRIMARY_COLOR), Text(f"الاسم: {user[1]}", size=16, color=TEXT_COLOR)]),
-                                    Row([Icon(icons.LOCK, color=PRIMARY_COLOR), Text(f"الكود: {user[0]}", size=16, color=TEXT_COLOR)]),
-                                    Row([Icon(icons.GROUP, color=PRIMARY_COLOR), Text(f"القسم: {user[2]}", size=16, color=TEXT_COLOR)]),
+                                    Row([Icon(icons.PERSON, color=PRIMARY_COLOR), Text(f"الاسم: {app_state.current_user['email']}", size=16, color=TEXT_COLOR)]),
+                                    Row([Icon(icons.LOCK, color=PRIMARY_COLOR), Text(f"الكود: {app_state.current_user['code']}", size=16, color=TEXT_COLOR)]),
+                                    Row([Icon(icons.GROUP, color=PRIMARY_COLOR), Text(f"القسم: {app_state.current_user['department']}", size=16, color=TEXT_COLOR)]),
                                 ], spacing=10),
                                 padding=15
                             ),
@@ -233,225 +176,41 @@ def main(page: Page):
             )
 
         elif page.route == "/ادارة_المستخدمين" and is_admin:
-            file_picker = FilePicker(on_result=lambda e: asyncio.run(upload_users_async(e, page)))
-
-            async def upload_users_async(e, page):
-                app_state.is_loading = True
-                page.update()
-                if e.files:
-                    file_path = e.files[0].path
-                    try:
-                        workbook = openpyxl.load_workbook(file_path)
-                        conn = sqlite3.connect("alson_education.db")
-                        c = conn.cursor()
-                        for sheet_name in workbook.sheetnames:
-                            sheet = workbook[sheet_name]
-                            department = sheet_name
-                            for row in sheet.iter_rows(min_row=2, values_only=True):
-                                username = str(row[0])
-                                password = str(row[1])
-                                code = str(uuid.uuid4())[:8]
-                                c.execute("INSERT OR REPLACE INTO users (code, username, department, role, password) VALUES (?, ?, ?, ?, ?)",
-                                        (code, username, department, "user", password))
-                        conn.commit()
-                        conn.close()
-                        page.snack_bar = SnackBar(content=Text("تم رفع المستخدمين بنجاح", color=Colors.GREEN), open=True)
-                    except Exception as ex:
-                        page.snack_bar = SnackBar(content=Text(f"حدث خطأ أثناء رفع الملف: {str(ex)}", color=Colors.RED), open=True)
-                else:
-                    page.snack_bar = SnackBar(content=Text("لم يتم اختيار ملف", color=Colors.RED), open=True)
-                app_state.is_loading = False
-                page.update()
-                page.go("/ادارة_المستخدمين")
-
-            conn = sqlite3.connect("alson_education.db")
-            c = conn.cursor()
-            c.execute("SELECT * FROM users")
-            users = c.fetchall()
-            conn.close()
-
-            user_table = DataTable(
-                columns=[
-                    DataColumn(Text("الكود", size=16, weight=FontWeight.BOLD)),
-                    DataColumn(Text("اسم المستخدم", size=16, weight=FontWeight.BOLD)),
-                    DataColumn(Text("القسم", size=16, weight=FontWeight.BOLD)),
-                    DataColumn(Text("الدور", size=16, weight=FontWeight.BOLD)),
-                    DataColumn(Text("كلمة المرور", size=16, weight=FontWeight.BOLD)),
-                    DataColumn(Text("إجراءات", size=16, weight=FontWeight.BOLD)),
-                ],
-                rows=[
-                    DataRow(cells=[
-                        DataCell(Text(user[0])),
-                        DataCell(Text(user[1])),
-                        DataCell(Text(user[2])),
-                        DataCell(Text(user[3])),
-                        DataCell(Text(user[4])),
-                        DataCell(Row([
-                            IconButton(icons.VISIBILITY, icon_color=Colors.GREEN, on_click=lambda e, u=user: view_user(u, page), tooltip="عرض"),
-                            IconButton(icons.EDIT, icon_color=Colors.BLUE, on_click=lambda e, u=user: edit_user(u, page), tooltip="تعديل"),
-                            IconButton(icons.DELETE, icon_color=Colors.RED, on_click=lambda e, u=user: delete_user(u, page), tooltip="حذف")
-                        ]))
-                    ]) for user in users
-                ],
-                border=border.all(1, Colors.GREY_400),
-                heading_row_color=Colors.GREY_200,
-                column_spacing=20,
-                data_row_max_height=50,
-            )
-
-            def view_user(user, page):
-                page.dialog = AlertDialog(
-                    title=Text("تفاصيل المستخدم"),
-                    content=Column([
-                        Text(f"الكود: {user[0]}", size=16),
-                        Text(f"اسم المستخدم: {user[1]}", size=16),
-                        Text(f"القسم: {user[2]}", size=16),
-                        Text(f"الدور: {user[3]}", size=16),
-                        Text(f"كلمة المرور: {user[4]}", size=16),
-                    ], spacing=10),
-                    actions=[TextButton("إغلاق", on_click=lambda _: setattr(page.dialog, "open", False) or page.update())],
-                    actions_alignment=MainAxisAlignment.END
-                )
-                page.dialog.open = True
-                page.update()
-
-            def edit_user(user, page):
-                edit_username = TextField(label="اسم المستخدم", value=user[1])
-                edit_department = TextField(label="القسم", value=user[2])
-                edit_role = Dropdown(
-                    label="الدور",
-                    options=[dropdown.Option("user", "مستخدم"), dropdown.Option("admin", "أدمن")],
-                    value=user[3]
-                )
-                edit_password = TextField(label="كلمة المرور", value=user[4], password=True, can_reveal_password=True)
-
-                def save_changes(e):
-                    conn = sqlite3.connect("alson_education.db")
-                    c = conn.cursor()
-                    c.execute("UPDATE users SET username=?, department=?, role=?, password=? WHERE code=?",
-                              (edit_username.value, edit_department.value, edit_role.value, edit_password.value, user[0]))
-                    conn.commit()
-                    conn.close()
-                    page.dialog.open = False
-                    page.update()
-                    page.go("/ادارة_المستخدمين")
-
-                page.dialog = AlertDialog(
-                    title=Text("تعديل بيانات المستخدم"),
-                    content=Column([edit_username, edit_department, edit_role, edit_password], spacing=10),
-                    actions=[
-                        ElevatedButton("حفظ", on_click=save_changes),
-                        TextButton("إلغاء", on_click=lambda _: setattr(page.dialog, "open", False) or page.update())
-                    ],
-                    actions_alignment=MainAxisAlignment.END
-                )
-                page.dialog.open = True
-                page.update()
-
-            def delete_user(user, page):
-                conn = sqlite3.connect("alson_education.db")
-                c = conn.cursor()
-                c.execute("DELETE FROM users WHERE code=?", (user[0],))
-                conn.commit()
-                conn.close()
-                page.go("/ادارة_المستخدمين")
-
             page.views.append(
                 create_view(
                     page,
                     "/ادارة_المستخدمين",
                     Column([
                         Text("إدارة المستخدمين", size=28, weight=FontWeight.BOLD, color=PRIMARY_COLOR),
-                        ElevatedButton(
-                            "رفع ملف Excel", on_click=lambda _: file_picker.pick_files(allowed_extensions=["xlsx"]),
-                            width=200, style=ButtonStyle(bgcolor=PRIMARY_COLOR, color=Colors.WHITE, elevation=3)
-                        ),
-                        Text("الصيغة: العمود الأول: اسم المستخدم، العمود الثاني: كلمة المرور، اسم الورقة: القسم", size=14, color=Colors.GREY_600),
-                        Divider(),
-                        Text("قائمة المستخدمين", size=20, weight=FontWeight.BOLD, color=PRIMARY_COLOR),
-                        Column(controls=[Container(content=user_table, width=800)], scroll="auto", expand=True),
-                        file_picker
+                        Text("هذه الصفحة غير متاحة في النسخة المحمولة حاليًا", size=16, color=Colors.GREY_600),
+                        ElevatedButton("عودة", on_click=lambda _: page.go("/الصفحه الراسية"), width=200, style=ButtonStyle(bgcolor=PRIMARY_COLOR, color=Colors.WHITE, elevation=3))
                     ], spacing=20, horizontal_alignment=CrossAxisAlignment.CENTER),
                     is_admin=True
                 )
             )
 
         elif page.route == "/رفع_المحتوى" and is_admin:
-            content_title = TextField(label="عنوان المحتوى", border_radius=15, bgcolor=Colors.WHITE, border_color=PRIMARY_COLOR)
-            content_picker = FilePicker(on_result=lambda e: asyncio.run(upload_content_async(e, page, content_title.value)))
-
-            async def upload_content_async(e, page, title):
-                if not title.strip():
-                    page.snack_bar = SnackBar(content=Text("يرجى إدخال عنوان المحتوى", color=Colors.RED), open=True)
-                    page.update()
-                    return
-                if e.files:
-                    file = e.files[0]
-                    file_path = os.path.join("uploads", file.name)
-                    os.makedirs("uploads", exist_ok=True)
-                    with open(file_path, "wb") as f:
-                        f.write(open(file.path, "rb").read())
-                    file_type = file.name.split(".")[-1].lower()
-                    conn = sqlite3.connect("alson_education.db")
-                    c = conn.cursor()
-                    c.execute("INSERT INTO content (title, file_path, file_type, uploaded_by, upload_date) VALUES (?, ?, ?, ?, ?)",
-                              (title, file_path, file_type, app_state.current_user["code"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                    conn.commit()
-                    conn.close()
-                    page.snack_bar = SnackBar(content=Text("تم رفع المحتوى بنجاح", color=Colors.GREEN), open=True)
-                    page.update()
-                else:
-                    page.snack_bar = SnackBar(content=Text("لم يتم اختيار ملف", color=Colors.RED), open=True)
-                    page.update()
-
             page.views.append(
                 create_view(
                     page,
                     "/رفع_المحتوى",
                     Column([
                         Text("رفع المحتوى", size=28, weight=FontWeight.BOLD, color=PRIMARY_COLOR),
-                        content_title,
-                        ElevatedButton(
-                            "اختر ملف", on_click=lambda _: content_picker.pick_files(),
-                            width=200, style=ButtonStyle(bgcolor=PRIMARY_COLOR, color=Colors.WHITE, elevation=3)
-                        ),
-                        Text("الصيغ المدعومة: PDF, صور (PNG, JPG), نصوص (TXT)", size=14, color=Colors.GREY_600),
-                        ElevatedButton("عودة", on_click=lambda _: page.go("/الصفحه الراسية"), width=200, style=ButtonStyle(bgcolor=ACCENT_COLOR, color=Colors.WHITE, elevation=3)),
-                        content_picker
+                        Text("هذه الصفحة غير متاحة في النسخة المحمولة حاليًا", size=16, color=Colors.GREY_600),
+                        ElevatedButton("عودة", on_click=lambda _: page.go("/الصفحه الراسية"), width=200, style=ButtonStyle(bgcolor=ACCENT_COLOR, color=Colors.WHITE, elevation=3))
                     ], spacing=20, horizontal_alignment=CrossAxisAlignment.CENTER),
                     is_admin=True
                 )
             )
 
         elif page.route == "/المحتوى":
-            conn = sqlite3.connect("alson_education.db")
-            c = conn.cursor()
-            c.execute("SELECT * FROM content")
-            contents = c.fetchall()
-            conn.close()
-
-            content_list = Column([
-                Card(
-                    content=Container(
-                        Column([
-                            Text(f"العنوان: {content[1]}", size=16, weight=FontWeight.BOLD),
-                            Text(f"نوع الملف: {content[3]}", size=14),
-                            Text(f"تاريخ الرفع: {content[5]}", size=14),
-                            ElevatedButton("عرض", on_click=lambda e, path=content[2]: page.launch_url(path) if os.path.exists(path) else page.snack_bar.__setattr__("content", Text("الملف غير موجود", color=Colors.RED)) or page.snack_bar.__setattr__("open", True) or page.update())
-                        ], spacing=10),
-                        padding=10
-                    ),
-                    elevation=5, shape=RoundedRectangleBorder(radius=15)
-                ) for content in contents
-            ], scroll="auto")
-
             page.views.append(
                 create_view(
                     page,
                     "/المحتوى",
                     Column([
                         Text("المحتوى التعليمي", size=28, weight=FontWeight.BOLD, color=PRIMARY_COLOR),
-                        content_list if contents else Text("لا يوجد محتوى متاح حاليًا", size=16, color=Colors.GREY_600),
+                        Text("لا يوجد محتوى متاح حاليًا", size=16, color=Colors.GREY_600),
                         ElevatedButton("عودة", on_click=lambda _: page.go("/الصفحه الراسية"), width=200, style=ButtonStyle(bgcolor=PRIMARY_COLOR, color=Colors.WHITE, elevation=3))
                     ], spacing=20, horizontal_alignment=CrossAxisAlignment.CENTER),
                     is_admin=is_admin
@@ -459,64 +218,13 @@ def main(page: Page):
             )
 
         elif page.route == "/الشات":
-            conn = sqlite3.connect("alson_education.db")
-            c = conn.cursor()
-            c.execute("SELECT code, username FROM users WHERE code != ?", (app_state.current_user["code"],))
-            users = c.fetchall()
-            conn.close()
-
-            receiver_dropdown = Dropdown(
-                label="اختر المستخدم",
-                options=[dropdown.Option(user[0], user[1]) for user in users],
-                border_radius=15, bgcolor=Colors.WHITE, border_color=PRIMARY_COLOR
-            )
-            message_field = TextField(label="اكتب رسالتك", border_radius=15, bgcolor=Colors.WHITE, border_color=PRIMARY_COLOR, multiline=True)
-            chat_display = Column(scroll="auto", expand=True)
-
-            def load_chat(e=None):
-                if receiver_dropdown.value:
-                    conn = sqlite3.connect("alson_education.db")
-                    c = conn.cursor()
-                    c.execute("SELECT sender_code, message, timestamp FROM chat WHERE (sender_code=? AND receiver_code=?) OR (sender_code=? AND receiver_code=?) ORDER BY timestamp",
-                              (app_state.current_user["code"], receiver_dropdown.value, receiver_dropdown.value, app_state.current_user["code"]))
-                    messages = c.fetchall()
-                    conn.close()
-                    chat_display.controls = [
-                        Container(
-                            content=Text(f"{msg[1]} - {msg[2]}", size=14, color=TEXT_COLOR if msg[0] == app_state.current_user["code"] else Colors.BLUE_600),
-                            padding=padding.all(10),
-                            bgcolor=Colors.GREY_100 if msg[0] == app_state.current_user["code"] else Colors.BLUE_50,
-                            border_radius=10,
-                            alignment=alignment.top_right if msg[0] == app_state.current_user["code"] else alignment.top_left
-                        ) for msg in messages
-                    ]
-                    page.update()
-
-            def send_message(e):
-                if receiver_dropdown.value and message_field.value.strip():
-                    conn = sqlite3.connect("alson_education.db")
-                    c = conn.cursor()
-                    c.execute("INSERT INTO chat (sender_code, receiver_code, message, timestamp) VALUES (?, ?, ?, ?)",
-                              (app_state.current_user["code"], receiver_dropdown.value, message_field.value.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                    conn.commit()
-                    conn.close()
-                    message_field.value = ""
-                    load_chat()
-
-            receiver_dropdown.on_change = load_chat
-
             page.views.append(
                 create_view(
                     page,
                     "/الشات",
                     Column([
                         Text("الشات", size=28, weight=FontWeight.BOLD, color=PRIMARY_COLOR),
-                        receiver_dropdown,
-                        chat_display,
-                        Row([
-                            message_field,
-                            IconButton(icons.SEND, icon_color=PRIMARY_COLOR, on_click=send_message)
-                        ]),
+                        Text("هذه الصفحة غير متاحة في النسخة المحمولة حاليًا", size=16, color=Colors.GREY_600),
                         ElevatedButton("عودة", on_click=lambda _: page.go("/الصفحه الراسية"), width=200, style=ButtonStyle(bgcolor=PRIMARY_COLOR, color=Colors.WHITE, elevation=3))
                     ], spacing=20, horizontal_alignment=CrossAxisAlignment.CENTER),
                     is_admin=is_admin
@@ -583,10 +291,10 @@ def main(page: Page):
                             content=Container(
                                 Column([
                                     Text("تواصلوا معنا", size=18, weight=FontWeight.BOLD, color=TEXT_COLOR),
-                                    Text("البريد: support@alson.edu", size=14, color=TEXT_COLOR),
+                                    Text("البريد: alalsunacademy@gmail.com", size=14, color=TEXT_COLOR),
                                     Text("الهاتف: 01023828155", size=14, color=TEXT_COLOR),
                                     Divider(),
-                                    Text("ساعات العمل: 8 صباحاً - 4 مساءً", size=14, color=TEXT_COLOR),
+                                    Text("ساعات العمل: 9 صباحاً - 4 مساءً", size=14, color=TEXT_COLOR),
                                 ]),
                                 padding=15
                             ),
