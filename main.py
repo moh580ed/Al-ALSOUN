@@ -154,7 +154,7 @@ def main(page: Page):
                         password_field,
                         ElevatedButton(
                             "تسجيل الدخول",
-                            on_click=lambda e: asyncio.run(validate_login_async(e)),
+                            on_click=validate_login_async,  # استدعاء مباشر للدالة المتزامنة
                             width=200, height=50, elevation=5,
                             style=ButtonStyle(bgcolor=PRIMARY_COLOR, color=Colors.WHITE, shape=RoundedRectangleBorder(radius=12)),
                         ),
