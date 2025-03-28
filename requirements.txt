@@ -1,5 +1,6 @@
 flet
-pandas
+openpyxl
 asyncio
 uuid
+os
 datetime
